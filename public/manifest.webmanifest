@@ -1,0 +1,1 @@
+{ "name": "Remember", "short_name": "Remember", "start_url": "/", "display": "standalone", "background_color": "#FBF6F0", "theme_color": "#FBF6F0", "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }] }
