@@ -4,12 +4,13 @@ import { KIND_META, LEAD_OPTIONS, type Item, type Kind } from "./model";
 import { BUCKETS, bucketOf, daysBetween, fmtDate, fmtTime, occurrence, relative, yearsSince } from "./dates";
 import { useStore } from "./store";
 import { requestPermission, useNotifier } from "./notify";
+import { supabase } from "./supabase";
 
 type Tab = "upcoming" | "dates" | "settings";
 type Filter = "all" | Kind;
 
 export default function App() {
-  const { items, settings, setSettings, upsert, remove, toggleDone } = useStore();
+  const { items, settings, setSettings, upsert, remove, toggleDone, session, sync } = useStore();
   const { permission, setPermission } = useNotifier(items, settings);
   const [tab, setTab] = useState<Tab>("upcoming");
   const [editing, setEditing] = useState<{ item?: Item; kind?: Kind } | null>(null);
@@ -50,7 +51,7 @@ export default function App() {
         {tab === "dates" && <Dates items={items} name={settings.partnerName} onOpen={setOpen} onAdd={() => setEditing({ kind: "date" })} />}
         {tab === "settings" && (
           <Settings
-            settings={settings} setSettings={setSettings} permission={permission}
+            settings={settings} setSettings={setSettings} permission={permission} email={session?.user.email} sync={sync}
             ask={async () => setPermission(await requestPermission())}
             clearAll={() => { if (confirm("Delete everything saved on this device?")) { items.forEach((i) => remove(i.id)); flash("All cleared"); } }}
           />
@@ -257,12 +258,44 @@ function Detail(p: { item: Item; name: string; onClose: () => void; onEdit: () =
 /* ---------- Settings ---------- */
 function Settings(p: {
   settings: ReturnType<typeof useStore>["settings"]; setSettings: (s: ReturnType<typeof useStore>["settings"]) => void;
-  permission: string; ask: () => void; clearAll: () => void;
+  permission: string; ask: () => void; clearAll: () => void; email?: string; sync: string;
 }) {
   const s = p.settings;
+  const [mail, setMail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [authErr, setAuthErr] = useState("");
+  const sendLink = async () => {
+    if (!supabase || !mail.includes("@")) return setAuthErr("Enter a valid email.");
+    setAuthErr("");
+    const { error } = await supabase.auth.signInWithOtp({ email: mail.trim(), options: { emailRedirectTo: window.location.origin } });
+    if (error) setAuthErr(error.message); else setSent(true);
+  };
   return (
     <>
       <header className="top"><h1>Settings</h1></header>
+      {supabase && (
+        <>
+          <p className="label">Account &amp; sync</p>
+          <div className="card-group">
+            {p.email ? (
+              <>
+                <div className="row"><span>Signed in</span><b>{p.email}</b></div>
+                <div className="row"><span>Sync</span><b>{{ synced: "Up to date", syncing: "Syncing…", error: "Couldn't sync", local: "Local only" }[p.sync]}</b></div>
+                <button className="row action" onClick={() => supabase!.auth.signOut()}>Sign out</button>
+              </>
+            ) : sent ? (
+              <p className="hint">Check {mail} for a sign-in link, then come back here.</p>
+            ) : (
+              <>
+                <label className="row"><span>Email</span><input className="right" type="email" placeholder="you@example.com" value={mail} onChange={(e) => setMail(e.target.value)} /></label>
+                <button className="row action" onClick={sendLink}>Email me a sign-in link</button>
+              </>
+            )}
+          </div>
+          {authErr && <p className="error" role="alert">{authErr}</p>}
+          {!p.email && !sent && <p className="hint">Optional. Sign in to keep your reminders across devices. Without it, everything stays on this device.</p>}
+        </>
+      )}
       <p className="label">Notifications</p>
       <div className="card-group">
         <div className="row">
@@ -281,7 +314,7 @@ function Settings(p: {
       </div>
       <p className="label">Privacy</p>
       <div className="card-group"><button className="row action danger" onClick={p.clearAll}>Delete all my data</button></div>
-      <p className="hint">Everything is stored only on this device. No account, no tracking.</p>
+      <p className="hint">Stored on this device, and synced to your private account only if you sign in. No tracking.</p>
       <div className="spacer" />
     </>
   );
